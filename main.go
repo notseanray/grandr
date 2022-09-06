@@ -1,19 +1,37 @@
 package main
+
 import (
     "fmt"
     "os/exec"
+    "reflect"
+    "strconv"
     "strings"
- //    "fyne.io/fyne/v2/app"
-	// "fyne.io/fyne/v2/container"
-	// "fyne.io/fyne/v2/widget"
+   "fyne.io/fyne/v2/app"
+    "fyne.io/fyne/v2/container"
+    "fyne.io/fyne/v2/widget"
 )
 
-type Screen struct {
+type Connection struct {
     connected bool
     primary bool
     modes []string
     width uint32
     height uint32
+}
+
+type RootScreen struct {
+    screenNum uint8
+    minimumX int16
+    minimumY int16
+    currentX int16
+    currentY int16
+    maxX int16
+    minY int16
+}
+
+type XrandrOutput struct {
+    root RootScreen
+    screens map[string]Connection
 }
 
 func contains[K comparable](v K, items []K) bool {
@@ -24,19 +42,81 @@ func contains[K comparable](v K, items []K) bool {
     }
     return false
 }
+type NumericInt interface {
+    int | int8 | int16 | int32 | int64 |
+    uint | uint8 | uint16 | uint32 | uint64
+}
 
-func fetchAndParse() string {
+// this is janky, does it even work??
+func convertFallible[V NumericInt](value string, defaltVal V) V {
+    result, err := strconv.ParseInt(value, 10, reflect.TypeOf((*V)(nil)).Elem().Bits())
+    if err != nil {
+        return defaltVal
+    }
+    return V(result)
+}
+
+func parseMonitors() string {
+    cmd := exec.Command("xrandr --listmonitors");
+    output, err := cmd.Output();
+    if err != nil {
+        fmt.Println("fail")
+    }
+    outputStr := strings.Split(string(output), "\n")
+    first := true
+    screenCount := uint8(0);
+    for _, i := range outputStr {
+        line := strings.Split(i, " ");
+        if first {
+            first = false;
+            screenCount = convertFallible[uint8](line[1], 0);
+        }
+        fmt.Println(screenCount)
+    }
+    return "test"
+}
+
+func fetchAndParse() XrandrOutput {
     cmd := exec.Command("xrandr");
     output, err := cmd.Output();
     if err != nil {
         fmt.Println("fail")
     }
-    var screens = make(map[string]Screen)
+    var screens = make(map[string]Connection)
     outputStr := strings.Split(string(output), "\n")
     latest := ""
+    first := true
+    rootscreen := RootScreen {
+        screenNum: 0,
+        minimumX: 0,
+        minimumY: 0,
+        currentX: 0,
+        currentY: 0,
+        maxX: 0,
+        minY: 0,
+    }
+    _ = rootscreen
     for _, i := range outputStr {
-        fmt.Println(i);
         if len(i) < 16 {
+            continue;
+        }
+        if first {
+            first = false
+            line := strings.Split(i, " ");
+            // the format is different
+            if len(line) != 14 {
+                continue;
+            }
+            rootscreen = RootScreen {
+                screenNum: convertFallible[uint8](line[1][0:len(line[1]) - 1], 0),
+                minimumX: convertFallible[int16](line[3], 0),
+                minimumY: convertFallible[int16](line[5][0:len(line[5]) - 1], 0),
+                currentX: convertFallible[int16](line[7], 0),
+                currentY: convertFallible[int16](line[9][0:len(line[9]) - 1], 0),
+                maxX: convertFallible[int16](line[11], 0),
+                minY: convertFallible[int16](line[13][0:len(line[13]) - 1], 0),
+            }
+            fmt.Println(rootscreen)
             continue;
         }
         if i[0:1] == " " {
@@ -49,32 +129,33 @@ func fetchAndParse() string {
         if len(line) < 2 {
             continue;
         }
-        fmt.Println("display: ", line[0])
+        fmt.Println("connector: ", line[0])
         latest = line[0]
         // sep := contains[string]("primary", line);
         s := []string{}
-        screens[line[0]] = Screen {
+        screens[line[0]] = Connection {
             connected: line[1] == "connected",
             primary: line[2] == "primary",
             modes: s,
         }
     }
-    return "test"
+    return XrandrOutput{ root: rootscreen, screens: screens }
 }
 
 func main() {
     fmt.Println("test");
-    fetchAndParse();
- //    a := app.New()
-	// w := a.NewWindow("Hello")
-	//
-	// hello := widget.NewLabel("Hello Fyne!")
-	// w.SetContent(container.NewVBox(
-	// 	hello,
-	// 	widget.NewButton("Hi!", func() {
-	// 		hello.SetText("Welcome :)")
-	// 	}),
-	// ))
-	//
-	// w.ShowAndRun()
+    data := fetchAndParse();
+    a := app.New()
+    w := a.NewWindow("grandr")
+
+    hello := widget.NewLabel("Screen")
+    hello.SetText("Screen: " + strconv.Itoa(int(data.root.screenNum)))
+    w.SetContent(container.NewVBox(
+     hello,
+     widget.NewButton("Hi!", func() {
+         fmt.Println("hi")
+     }),
+    ))
+
+    w.ShowAndRun()
 }
