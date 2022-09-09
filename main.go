@@ -2,6 +2,7 @@ package main
 
 import (
     "fmt"
+    "os"
     "os/exec"
     "reflect"
     "sort"
@@ -183,6 +184,12 @@ func main() {
     for _, d := range data.screens {
         sortedList = append(sortedList, d)
     }
+    test := exec.Command("xrandr")
+    test.Args = []string{"--listmonitors"}
+    errs := test.Run()
+    if errs != nil {
+        fmt.Println(errs)
+    }
     sort.Sort(ConnectionSorted(sortedList))
     fmt.Println(sortedList)
     a := app.New()
@@ -191,23 +198,36 @@ func main() {
     buttons = append(buttons, widget.NewLabel("Screen: "+strconv.Itoa(int(data.root.screenNum))))
     for _, d := range sortedList {
         // change this to have default values then reassign
-        if d.connected {
-            screenEntry := widget.NewButton("set as primary", func() {
-                // parse xrandr --listmonitors, based on that set as primary
-            })
-            screenCard := widget.NewCard(
-                d.name,
-                "Connected: "+strconv.FormatBool(d.connected)+" Primary: "+strconv.FormatBool(d.primary), screenEntry)
-            buttons = append(buttons, screenCard)
-        } else {
-            screenEntry := widget.NewButton("test", func() {
-                // parse xrandr --listmonitors, based on that set as primary
-            })
-            screenCard := widget.NewCard(
-                d.name,
-                "Connected: "+strconv.FormatBool(d.connected), screenEntry)
-            buttons = append(buttons, screenCard)
+        v := d
+        buttonLabel := "connect"
+        var layout []fyne.CanvasObject
+        if v.connected {
+            buttonLabel = "disconnect"
         }
+        if !v.primary && v.connected {
+            setAsPrimaryButton := widget.NewButton("set as primary", func() {
+                // parse xrandr --listmonitors, based on that set as primary
+                fmt.Println(v.name)
+                cmd := exec.Command("xrandr")
+                cmd.Args = []string{"--output", v.name, "--primary"}
+                fmt.Println(cmd.Args)
+                cmd.Env = os.Environ()
+                err := cmd.Run()
+                if err != nil {
+                    fmt.Println(err)
+                }
+            })
+            layout = append(layout, setAsPrimaryButton)
+        }
+        screenEntry := widget.NewButton(buttonLabel, func() {
+            // parse xrandr --listmonitors, based on that set as primary
+        })
+        layout = append(layout, screenEntry)
+        subContent := container.NewGridWithColumns(len(layout), layout...)
+        screenCard := widget.NewCard(
+            v.name,
+            "Connected: "+strconv.FormatBool(v.connected)+" Primary: "+strconv.FormatBool(v.primary), subContent)
+        buttons = append(buttons, screenCard)
     }
     content := container.NewGridWithRows(len(data.screens)+1, buttons...)
     w.SetContent(content)
